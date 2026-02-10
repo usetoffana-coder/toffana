@@ -5,18 +5,18 @@
 
 const AppConfig = {
   firebase: {
-  apiKey: "AIzaSyAZ90xAptvBeRDFl52FI7-WJJD14I6YKk4",
-  authDomain: "drak-feet-admin.firebaseapp.com",
-  projectId: "drak-feet-admin",
-  storageBucket: "drak-feet-admin.firebasestorage.app",
-  messagingSenderId: "525123704162",
-  appId: "1:525123704162:web:ea0a3bc86663334a79c83b",
-  measurementId: "G-EFERT7RZZ5"
+  apiKey: "AIzaSyDVeC9IuQdAvog4ddXxyrUS4o5j-4xdby4",
+  authDomain: "toffana-catalogo.firebaseapp.com",
+  projectId: "toffana-catalogo",
+  storageBucket: "toffana-catalogo.firebasestorage.app",
+  messagingSenderId: "419274574420",
+  appId: "1:419274574420:web:95ea11098657444909fbc1",
+  measurementId: "G-PMLY4M8G5P"
   },
 
   cloudinary: {
-   cloudName: 'dz2alj2st',
-    uploadPreset: 'drakfeet_products'
+   cloudName: 'djcx6aick',
+    uploadPreset: 'toffana-catalogo'
   },
 
   appCheck: {
