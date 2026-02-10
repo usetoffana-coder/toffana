@@ -5,13 +5,13 @@
 
 const AppConfig = {
   firebase: {
-  apiKey: "AIzaSyDVeC9IuQdAvog4ddXxyrUS4o5j-4xdby4",
-  authDomain: "toffana-catalogo.firebaseapp.com",
-  projectId: "toffana-catalogo",
-  storageBucket: "toffana-catalogo.firebasestorage.app",
-  messagingSenderId: "419274574420",
-  appId: "1:419274574420:web:95ea11098657444909fbc1",
-  measurementId: "G-PMLY4M8G5P"
+  apiKey: "AIzaSyDXhM8CntfcjNL2sH3vv7DPKDLh3y_Cc4U",
+  authDomain: "toffana-catalogo-97b4d.firebaseapp.com",
+  projectId: "toffana-catalogo-97b4d",
+  storageBucket: "toffana-catalogo-97b4d.firebasestorage.app",
+  messagingSenderId: "919713222744",
+  appId: "1:919713222744:web:07cdbda97e04385cc87a2d",
+  measurementId: "G-W8PKZFEZGR"
   },
 
   cloudinary: {
