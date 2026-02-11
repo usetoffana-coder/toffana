@@ -1,0 +1,548 @@
+﻿rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =============================
+    // FUNÇÕES AUXILIARES
+    // =============================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid));
+    }
+
+    function userDocExists() {
+      return exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
+    }
+
+    function userDocRole() {
+      return userDocExists() ? userDoc().data.role : null;
+    }
+
+    function isActiveUser() {
+      return isAuthenticated()
+        && (userDoc().data.ativo == true
+          || tokenRole() in ['admin','ADMIN','administrator','administrador','adm','superadmin','super-admin',
+            'editor','EDITOR','analista','ANALISTA','ANALYST']);
+    }
+
+    function tokenRole() {
+      return isAuthenticated() ? request.auth.token.role : null;
+    }
+
+    function isAdmin() {
+      return (isAuthenticated()
+          && (tokenRole() in ['admin','ADMIN','administrator','administrador','adm','superadmin','super-admin']))
+        || (isAuthenticated()
+          && userDocExists()
+          && (userDocRole() in ['admin','ADMIN','administrator','administrador','adm','superadmin','super-admin'])
+          && !(userDoc().data.ativo == false));
+    }
+
+    function isEditor() {
+      return isActiveUser()
+        && (tokenRole() == 'editor' || tokenRole() == 'EDITOR'
+          || userDoc().data.role == 'editor' || userDoc().data.role == 'EDITOR');
+    }
+
+    function isAnalista() {
+      return isActiveUser()
+        && (tokenRole() == 'analista' || tokenRole() == 'analyst'
+          || tokenRole() == 'ANALYST' || tokenRole() == 'ANALISTA'
+          || userDoc().data.role == 'analista' || userDoc().data.role == 'ANALYST');
+    }
+
+    function canManageProducts() {
+      return isAdmin() || isEditor();
+    }
+
+    function canManageConfig() {
+      return isAdmin() || isEditor();
+    }
+
+    function canReadMetrics() {
+      return isAdmin() || isAnalista();
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function onlyAllowedFields(allowed) {
+      return request.resource.data.keys().hasOnly(allowed);
+    }
+
+    function isValidString(field, min, max) {
+      return request.resource.data[field] is string
+        && request.resource.data[field].size() >= min
+        && request.resource.data[field].size() <= max;
+    }
+
+    function isPositiveNumber(field) {
+      return request.resource.data[field] is number
+        && request.resource.data[field] >= 0;
+    }
+
+    function isValidArray(field, max) {
+      return request.resource.data[field] is list
+        && request.resource.data[field].size() <= max;
+    }
+
+    function isValidUrl(field) {
+      return request.resource.data[field] is string
+        && (request.resource.data[field].matches('^https?://[^\\s]+$')
+        || request.resource.data[field] == '');
+    }
+
+    function isValidMenuUrl(field) {
+      return request.resource.data[field] is string
+        && (request.resource.data[field].matches('^https?://[^\\s]+$')
+        || request.resource.data[field].matches('^/[^\\s]*$')
+        || request.resource.data[field].matches('^#.*$'));
+    }
+
+    function isBoolean(field) {
+      return request.resource.data[field] is bool;
+    }
+
+    function isValidStatus() {
+      return request.resource.data.status in ['draft','published','archived'];
+    }
+
+    // =============================
+    // ADMIN OVERRIDE (FULL ACCESS)
+    // =============================
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // =============================
+    // PRODUTOS
+    // =============================
+    match /produtos/{produtoId} {
+      allow read: if isActiveUser()
+        || (resource.data.ativo == true
+        && (!('status' in resource.data) || resource.data.status == 'published'));
+
+      allow create: if canManageProducts()
+        && hasRequiredFields(['nome','marca','precoPix','precoCartao','tamanhos','imagemUrl','ativo','tipoProdutoId','status'])
+        && onlyAllowedFields([
+          'nome','marca','categoria','tipoProdutoId','tipoProdutoNome',
+          'slug','seoTitle','seoDescription','relacionados','featured',
+          'precoPix','precoCartao','tamanhos','imagemUrl','ativo',
+          'priceHistory','criadoEm','atualizadoEm','status','publishedAt'
+        ])
+        && isValidString('nome', 1, 120)
+        && isValidString('marca', 1, 120)
+        && isValidString('imagemUrl', 1, 500)
+        && isPositiveNumber('precoPix')
+        && isPositiveNumber('precoCartao')
+        && request.resource.data.precoPix <= request.resource.data.precoCartao
+        && request.resource.data.precoPix <= 99999
+        && request.resource.data.precoCartao <= 99999
+        && isValidArray('tamanhos', 60)
+        && isBoolean('ativo')
+        && isValidUrl('imagemUrl')
+        && isValidStatus()
+        && request.resource.data.criadoEm == request.time
+        && request.resource.data.atualizadoEm == request.time
+        && ((request.resource.data.status == 'published' && request.resource.data.publishedAt == request.time)
+          || (request.resource.data.status != 'published' && !('publishedAt' in request.resource.data)))
+        && (!('slug' in request.resource.data) || request.resource.data.slug.size() <= 120)
+        && (!('seoTitle' in request.resource.data) || request.resource.data.seoTitle.size() <= 120)
+        && (!('seoDescription' in request.resource.data) || request.resource.data.seoDescription.size() <= 200)
+        && (!('relacionados' in request.resource.data) || isValidArray('relacionados', 20))
+        && (!('featured' in request.resource.data) || isBoolean('featured'))
+        && (!('priceHistory' in request.resource.data) || isValidArray('priceHistory', 30));
+
+      allow update: if canManageProducts()
+        && hasRequiredFields(['nome','marca','precoPix','precoCartao','tamanhos','imagemUrl','ativo','tipoProdutoId','status'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'nome','marca','categoria','tipoProdutoId','tipoProdutoNome',
+          'slug','seoTitle','seoDescription','relacionados','featured',
+          'precoPix','precoCartao','tamanhos','imagemUrl','ativo',
+          'priceHistory','atualizadoEm','status','publishedAt'
+        ])
+        && isValidString('nome', 1, 120)
+        && isValidString('marca', 1, 120)
+        && isValidString('imagemUrl', 1, 500)
+        && isPositiveNumber('precoPix')
+        && isPositiveNumber('precoCartao')
+        && request.resource.data.precoPix <= request.resource.data.precoCartao
+        && request.resource.data.precoPix <= 99999
+        && request.resource.data.precoCartao <= 99999
+        && isValidArray('tamanhos', 60)
+        && isBoolean('ativo')
+        && isValidUrl('imagemUrl')
+        && isValidStatus()
+        && request.resource.data.atualizadoEm == request.time
+        && ((request.resource.data.status == 'published'
+              && ((('publishedAt' in resource.data) && request.resource.data.publishedAt == resource.data.publishedAt)
+                || (!('publishedAt' in resource.data) && request.resource.data.publishedAt == request.time)))
+          || (request.resource.data.status != 'published' && (!('publishedAt' in request.resource.data) || request.resource.data.publishedAt == null)))
+        && (!('slug' in request.resource.data) || request.resource.data.slug.size() <= 120)
+        && (!('seoTitle' in request.resource.data) || request.resource.data.seoTitle.size() <= 120)
+        && (!('seoDescription' in request.resource.data) || request.resource.data.seoDescription.size() <= 200)
+        && (!('relacionados' in request.resource.data) || isValidArray('relacionados', 20))
+        && (!('featured' in request.resource.data) || isBoolean('featured'))
+        && (!('priceHistory' in request.resource.data) || isValidArray('priceHistory', 30));
+
+      allow delete: if canManageProducts();
+    }
+
+    // =============================
+    // TIPOS DE PRODUTO
+    // =============================
+    match /tipos_produto/{tipoId} {
+      allow read: if isActiveUser() || resource.data.ativo == true;
+
+      allow create, update, delete: if canManageProducts()
+        && hasRequiredFields(['nome','nomePropriedade','opcoesTamanho','ativo'])
+        && onlyAllowedFields(['nome','nomePropriedade','opcoesTamanho','ativo'])
+        && isValidString('nome', 1, 120)
+        && isValidString('nomePropriedade', 1, 120)
+        && isValidArray('opcoesTamanho', 100)
+        && isBoolean('ativo');
+    }
+
+    // =============================
+    // CONFIGURAÇÕES
+    // =============================
+    match /config/{docId} {
+      allow read: if docId == 'loja' || isActiveUser();
+
+      allow create, update: if canManageConfig()
+        && hasRequiredFields(['nomeLoja','whatsapp'])
+        && onlyAllowedFields([
+          'nomeLoja','whatsapp','mensagemPadrao','mensagemCarrinho',
+          'taxaMotoboy','parcelasSemJuros','descontoPix','pixelFacebook',
+          'gtmGoogle','googleAnalytics','menuCategorias','marcasCadastradas',
+          'categoriasCadastradas','avisoTexto','avisoBotaoTexto','avisoBotaoUrl','avisoMotoboy','avisoEntregaTexto',
+          'logoUrl','whatsappFlutuante','whatsappMensagemFlutuante',
+          'whatsappMensagemInicial','exibirHorario','horarioSegSexInicio',
+          'horarioSegSexFim','horarioSabInicio','horarioSabFim','atendeDOM',
+          'mensagemForaHorario','permitirForaHorario','telefone','email','endereco','atendeDomingo',
+          'customizacao','exibirTaxaEntrega','sliderAutoPlay','sliderInterval',
+          'exibirDescontoPix','exibirParcelas','valorMinimoParcela',
+          'aceitaDinheiro','aceitaBoleto','observacoesPagamento','mensagemCarrinhoItem',
+          'pixelAtivo','gtmAtivo','gaAtivo','footerTexto',
+          'rastrearCliquesOutbound','rastrearScrollDepth','rastrearTempoNaPagina',
+          'entregaRetiradaAtivo','entregaMotoboyAtivo',
+          'atualizadoEm'
+        ])
+        && isValidString('nomeLoja', 1, 120)
+        && isValidString('whatsapp', 10, 15)
+        && request.resource.data.whatsapp.matches('^[0-9]{10,15}$')
+        && (!('footerTexto' in request.resource.data) || request.resource.data.footerTexto.size() <= 300)
+        && (!('mensagemCarrinhoItem' in request.resource.data) || request.resource.data.mensagemCarrinhoItem.size() <= 1500)
+        && (!('permitirForaHorario' in request.resource.data) || request.resource.data.permitirForaHorario is bool)
+        && (!('entregaRetiradaAtivo' in request.resource.data) || request.resource.data.entregaRetiradaAtivo is bool)
+        && (!('entregaMotoboyAtivo' in request.resource.data) || request.resource.data.entregaMotoboyAtivo is bool)
+        && request.resource.data.atualizadoEm == request.time;
+
+      allow delete: if canManageConfig();
+    }
+
+    // =============================
+    // VERSIONAMENTO DE CONFIG
+    // =============================
+    match /config_versions/{versionId} {
+      allow read, create, delete: if isAdmin();
+    }
+
+    // =============================
+    // BANNERS
+    // =============================
+    match /banners/{bannerId} {
+      allow read: if resource.data.ativo == true || isActiveUser();
+
+      allow create, update: if canManageConfig()
+        && hasRequiredFields(['imagemUrl','ordem','ativo'])
+        && onlyAllowedFields(['titulo','texto','imagemUrl','linkUrl','ordem','ativo','tipo','criadoEm','atualizadoEm'])
+        && isValidUrl('imagemUrl')
+        && isPositiveNumber('ordem')
+        && isBoolean('ativo')
+        && (!('linkUrl' in request.resource.data) || isValidUrl('linkUrl'))
+        && request.resource.data.ordem >= 0
+        && request.resource.data.ordem <= 100
+        && (!('criadoEm' in request.resource.data) || request.resource.data.criadoEm == request.time)
+        && request.resource.data.atualizadoEm == request.time;
+
+      allow delete: if canManageConfig();
+    }
+
+    // =============================
+    // MENU LINKS
+    // =============================
+    match /menu_links/{linkId} {
+      allow read: if resource.data.ativo == true || isActiveUser();
+      allow create, update: if canManageConfig()
+        && hasRequiredFields(['texto','url','ordem','ativo'])
+        && onlyAllowedFields(['texto','url','icone','ordem','abrirNovaAba','destacado','ativo','criadoEm','atualizadoEm'])
+        && isValidString('texto', 1, 120)
+        && isValidMenuUrl('url')
+        && isPositiveNumber('ordem')
+        && isBoolean('ativo')
+        && (!('abrirNovaAba' in request.resource.data) || isBoolean('abrirNovaAba'))
+        && (!('destacado' in request.resource.data) || isBoolean('destacado'))
+        && (!('criadoEm' in request.resource.data) || request.resource.data.criadoEm == request.time)
+        && request.resource.data.atualizadoEm == request.time;
+      allow delete: if canManageConfig();
+    }
+
+    // =============================
+    // PÁGINAS CUSTOMIZADAS
+    // =============================
+    match /paginas/{paginaId} {
+      allow read: if resource.data.ativo == true || isActiveUser();
+
+      allow create: if canManageConfig()
+        && hasRequiredFields(['titulo','slug','modoConteudo','ativo'])
+        && onlyAllowedFields(['titulo','slug','modoConteudo','conteudoHtml','conteudoTexto','conteudoBlocos','ativo','criadoEm','atualizadoEm'])
+        && isValidString('titulo', 1, 120)
+        && request.resource.data.slug is string
+        && request.resource.data.slug.size() >= 1
+        && request.resource.data.slug.size() <= 120
+        && request.resource.data.slug.matches('^[a-z0-9-]+$')
+        && request.resource.data.modoConteudo in ['texto','html','blocos']
+        && (request.resource.data.modoConteudo == 'texto'
+          ? (request.resource.data.conteudoTexto is string && request.resource.data.conteudoTexto.size() <= 20000)
+          : (request.resource.data.modoConteudo == 'html'
+            ? (request.resource.data.conteudoHtml is string && request.resource.data.conteudoHtml.size() <= 20000)
+            : (request.resource.data.conteudoBlocos is list && request.resource.data.conteudoBlocos.size() <= 200)))
+        && isBoolean('ativo')
+        && request.resource.data.criadoEm == request.time
+        && request.resource.data.atualizadoEm == request.time;
+
+      allow update: if canManageConfig()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'titulo','slug','modoConteudo','conteudoHtml','conteudoTexto','conteudoBlocos','ativo','atualizadoEm'
+        ])
+        && (!('titulo' in request.resource.data) || isValidString('titulo', 1, 120))
+        && (!('slug' in request.resource.data)
+          || (request.resource.data.slug is string
+            && request.resource.data.slug.size() >= 1
+            && request.resource.data.slug.size() <= 120
+            && request.resource.data.slug.matches('^[a-z0-9-]+$')))
+        && (!('modoConteudo' in request.resource.data) || request.resource.data.modoConteudo in ['texto','html','blocos'])
+        && (!('conteudoTexto' in request.resource.data) || (request.resource.data.conteudoTexto is string && request.resource.data.conteudoTexto.size() <= 20000))
+        && (!('conteudoHtml' in request.resource.data) || (request.resource.data.conteudoHtml is string && request.resource.data.conteudoHtml.size() <= 20000))
+        && (!('conteudoBlocos' in request.resource.data) || (request.resource.data.conteudoBlocos is list && request.resource.data.conteudoBlocos.size() <= 200))
+        && (!('ativo' in request.resource.data) || isBoolean('ativo'))
+        && request.resource.data.atualizadoEm == request.time;
+
+      allow delete: if canManageConfig();
+    }
+
+    // =============================
+    // REDES SOCIAIS
+    // =============================
+    match /redes_sociais/{redeId} {
+      allow read: if resource.data.ativo == true || isActiveUser();
+
+      allow create, update: if canManageConfig()
+        && hasRequiredFields(['nome','url','ativo','ordem'])
+        && onlyAllowedFields(['tipo','nome','icone','url','ordem','ativo','criadoEm','atualizadoEm'])
+        && isValidString('nome', 1, 120)
+        && isValidUrl('url')
+        && isPositiveNumber('ordem')
+        && isBoolean('ativo')
+        && (!('criadoEm' in request.resource.data) || request.resource.data.criadoEm == request.time)
+        && request.resource.data.atualizadoEm == request.time;
+
+      allow delete: if canManageConfig();
+    }
+
+    // =============================
+    // MÉTRICAS
+    // =============================
+    match /metricas/{metricaId} {
+      allow read: if canReadMetrics();
+
+      allow create: if request.resource.data.keys().hasAll(['tipo','timestamp'])
+        && request.resource.data.keys().hasOnly([
+          'tipo','timestamp','produtoId','produtoNome','bannerId','termo','filtros','userAgent',
+          'url','valor','total','items','source'
+        ])
+        && request.resource.data.tipo in [
+          'page_view','product_view','add_to_cart','whatsapp_click',
+          'banner_click','search','filter_apply','whatsapp_floating_click','checkout_whatsapp'
+        ]
+        && request.resource.data.timestamp == request.time
+        && (!('url' in request.resource.data) || isValidUrl('url'))
+        && (!('valor' in request.resource.data) || isPositiveNumber('valor'))
+        && (!('total' in request.resource.data) || isPositiveNumber('total'))
+        && (!('items' in request.resource.data) || isPositiveNumber('items'))
+        && (!('source' in request.resource.data)
+          || (request.resource.data.source is string
+            && request.resource.data.source.size() <= 120));
+
+      allow update, delete: if false;
+    }
+
+    // =============================
+    // USUÁRIOS (ADMIN)
+    // =============================
+    match /usuarios/{userId} {
+      allow read: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
+
+      allow create: if (isAuthenticated() && request.auth.uid == userId
+          && hasRequiredFields(['email','role','ativo','criadoEm'])
+          && onlyAllowedFields(['email','role','ativo','criadoEm','atualizadoEm','displayName'])
+          && request.resource.data.email is string
+          && request.resource.data.email.matches('^[^@]+@[^@]+\\.[^@]+$')
+          && request.resource.data.role in ['admin','editor','analista','ADMIN','EDITOR','ANALYST','ANALISTA']
+          && (request.auth.token.email == request.resource.data.email)
+          && request.resource.data.ativo == true
+          && request.resource.data.criadoEm == request.time)
+        || (isAdmin()
+          && hasRequiredFields(['email','role','ativo','criadoEm'])
+          && onlyAllowedFields(['email','role','ativo','criadoEm','atualizadoEm','displayName'])
+          && request.resource.data.email is string
+          && request.resource.data.email.matches('^[^@]+@[^@]+\\.[^@]+$')
+          && request.resource.data.role in ['admin','editor','analista','ADMIN','EDITOR','ANALYST','ANALISTA']
+          && request.resource.data.criadoEm == request.time);
+
+      allow update: if (isAdmin()
+          && onlyAllowedFields(['email','role','ativo','atualizadoEm','displayName'])
+          && (!('email' in request.resource.data) || request.resource.data.email.matches('^[^@]+@[^@]+\\.[^@]+$'))
+          && (!('role' in request.resource.data) || request.resource.data.role in ['admin','editor','analista','ADMIN','EDITOR','ANALYST','ANALISTA'])
+          && (!('ativo' in request.resource.data) || isBoolean('ativo'))
+          && request.resource.data.atualizadoEm == request.time)
+        || (isAuthenticated()
+          && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['atualizadoEm','displayName'])
+          && request.resource.data.atualizadoEm == request.time);
+
+      allow delete: if isAdmin();
+    }
+
+    // =============================
+    // CARRINHOS (opcional)
+    // =============================
+    match /carrinhos/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+
+      allow create, update: if isAuthenticated()
+        && request.auth.uid == userId
+        && request.resource.data.items is list
+        && request.resource.data.items.size() <= 50
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    // =============================
+    // PEDIDOS (opcional)
+    // =============================
+    match /pedidos/{pedidoId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+
+      allow create: if isAuthenticated()
+        && hasRequiredFields(['userId','items','total','status','criadoEm'])
+        && request.resource.data.userId == request.auth.uid
+        && isValidArray('items', 50)
+        && isPositiveNumber('total')
+        && request.resource.data.status == 'pendente'
+        && request.resource.data.criadoEm == request.time;
+
+      allow update, delete: if false;
+    }
+
+    // =============================
+    // LOGS DE AUDITORIA
+    // =============================
+    match /audit_logs/{logId} {
+      allow read: if isAdmin() || isAnalista();
+      allow create: if isActiveUser()
+        && hasRequiredFields(['action','entity','timestamp','userId'])
+        && onlyAllowedFields(['userId','role','action','entity','entityId','before','after','timestamp','userAgent','meta','ip'])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.timestamp == request.time;
+      allow update, delete: if false;
+    }
+
+    // =============================
+    // CATEGORIAS
+    // =============================
+    match /categorias/{categoriaId} {
+      allow read: if resource.data.ativo == true || isActiveUser();
+      allow create, update, delete: if canManageConfig()
+        && hasRequiredFields(['nome','ordem','ativo','slug'])
+        && onlyAllowedFields(['nome','slug','ordem','ativo','criadoEm','atualizadoEm'])
+        && isValidString('nome', 1, 120)
+        && isValidString('slug', 1, 120)
+        && isPositiveNumber('ordem')
+        && isBoolean('ativo')
+        && (!('criadoEm' in request.resource.data) || request.resource.data.criadoEm == request.time)
+        && request.resource.data.atualizadoEm == request.time;
+    }
+
+    // =============================
+    // MARCAS
+    // =============================
+    match /marcas/{marcaId} {
+      allow read: if resource.data.ativo == true || isActiveUser();
+      allow create, update, delete: if canManageConfig()
+        && hasRequiredFields(['nome','ativo','slug'])
+        && onlyAllowedFields(['nome','slug','logoUrl','descricao','ativo','criadoEm','atualizadoEm'])
+        && isValidString('nome', 1, 120)
+        && isValidString('slug', 1, 120)
+        && (!('logoUrl' in request.resource.data) || isValidUrl('logoUrl'))
+        && (!('descricao' in request.resource.data) || request.resource.data.descricao.size() <= 500)
+        && isBoolean('ativo')
+        && (!('criadoEm' in request.resource.data) || request.resource.data.criadoEm == request.time)
+        && request.resource.data.atualizadoEm == request.time;
+    }
+
+    // =============================
+    // CUPONS
+    // =============================
+    match /cupons/{cupomId} {
+      allow read: if isActiveUser();
+      allow create, update: if canManageConfig()
+        && hasRequiredFields(['codigo','desconto','ativo','validade'])
+        && isValidString('codigo', 1, 50)
+        && isPositiveNumber('desconto')
+        && isBoolean('ativo')
+        && request.resource.data.desconto >= 0
+        && request.resource.data.desconto <= 100;
+      allow delete: if canManageConfig();
+    }
+
+    // =============================
+    // NOTIFICAÇÕES
+    // =============================
+    match /notificacoes/{userId}/mensagens/{mensagemId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated()
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lida']);
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // =============================
+    // REVIEWS
+    // =============================
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isAuthenticated()
+        && hasRequiredFields(['produtoId','userId','rating','comentario'])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5
+        && request.resource.data.comentario.size() <= 1000;
+
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // =============================
+    // REGRA PADRÃO
+    // =============================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
